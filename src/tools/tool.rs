@@ -11,6 +11,12 @@ pub trait Tool: Send + Sync {
 
     fn parameters(&self) -> Value;
 
+    /// 工具来源分组标签，用于展示时按来源归类。
+    /// 本地内置工具用默认值；MCP 工具各自返回对应 server 名。
+    fn source(&self) -> &str {
+        "内置工具"
+    }
+
     async fn execute(&self, args_json: &str, context: &ExecutionContext) -> anyhow::Result<String>;
 
     fn definition(&self) -> anyhow::Result<ChatCompletionTools> {

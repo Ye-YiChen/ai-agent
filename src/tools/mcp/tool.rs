@@ -13,6 +13,7 @@ pub struct McpTool {
     name: String,
     description: String,
     parameters: Value,
+    source: String,
 }
 
 impl McpTool {
@@ -20,7 +21,9 @@ impl McpTool {
     /// name / description 转成 owned String，是因为 Tool trait 要求
     /// name(&self) -> &str 返回的引用要跟 self 的生命周期绑在一起，
     /// 不能直接借用 rmcp::model::Tool 里 'static 的 Cow<str>。
-    pub fn new(client: Arc<McpClient>, tool: rmcp::model::Tool) -> Self {
+    ///
+    /// `source` 是该工具所属的 MCP server 分组标签（如 "Expense MCP"、"GitHub MCP"）。
+    pub fn new(client: Arc<McpClient>, tool: rmcp::model::Tool, source: impl Into<String>) -> Self {
         let parameters = Value::Object((*tool.input_schema).clone());
 
         Self {
@@ -31,6 +34,7 @@ impl McpTool {
                 .map(|d| d.to_string())
                 .unwrap_or_default(),
             parameters,
+            source: source.into(),
         }
     }
 }
@@ -47,6 +51,10 @@ impl Tool for McpTool {
 
     fn parameters(&self) -> Value {
         self.parameters.clone()
+    }
+
+    fn source(&self) -> &str {
+        &self.source
     }
 
     async fn execute(&self, args_json: &str, _context: &ExecutionContext) -> anyhow::Result<String> {

@@ -24,7 +24,7 @@ pub async fn build_toolbox() -> anyhow::Result<ToolBox> {
     // 这里是连接 MCP Server 并获取工具列表，然后把它们包装成 McpTool 并加入到工具箱中
     let mcp_client = Arc::new(McpClient::connect().await?);
     for tool in mcp_client.list_tools().await? {
-        tools.push(Box::new(McpTool::new(mcp_client.clone(), tool)));
+        tools.push(Box::new(McpTool::new(mcp_client.clone(), tool, "Expense MCP")));
     }
 
     Ok(into_toolbox(tools))
@@ -52,7 +52,29 @@ pub async fn build_full_toolbox(vision_model: impl Into<String>) -> anyhow::Resu
     // 拉起 MCP Server（expense_mcp_server）并把它暴露的工具也装进来
     let mcp_client = Arc::new(McpClient::connect().await?);
     for tool in mcp_client.list_tools().await? {
-        tools.push(Box::new(McpTool::new(mcp_client.clone(), tool)));
+        tools.push(Box::new(McpTool::new(mcp_client.clone(), tool, "Expense MCP")));
+    }
+
+    // 可选：接入 GitHub 官方 MCP Server。
+    // 仅当设置了 GITHUB_PERSONAL_ACCESS_TOKEN 时启用（token 是必需项）；
+    // 二进制路径由 GITHUB_MCP_SERVER_PATH 指定，缺省则从 PATH 找 github-mcp-server。
+    // 连接失败不影响其它工具。
+    if std::env::var("GITHUB_PERSONAL_ACCESS_TOKEN").is_ok() {
+        match McpClient::connect_github().await {
+            Ok(client) => {
+                let client = Arc::new(client);
+                match client.list_tools().await {
+                    Ok(gh_tools) => {
+                        tracing::info!("已接入 GitHub MCP，加载 {} 个工具", gh_tools.len());
+                        for tool in gh_tools {
+                            tools.push(Box::new(McpTool::new(client.clone(), tool, "GitHub MCP")));
+                        }
+                    }
+                    Err(e) => tracing::warn!("GitHub MCP list_tools 失败，跳过：{e}"),
+                }
+            }
+            Err(e) => tracing::warn!("连接 GitHub MCP 失败，跳过：{e}"),
+        }
     }
 
     Ok(into_toolbox(tools))

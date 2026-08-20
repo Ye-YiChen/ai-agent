@@ -22,7 +22,7 @@ use ai_agent::{
     agent::{Agent, ContentItem, ExecutionContext, ToolProgress},
     callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback},
     constant::{DEEPSEEK_FLASH, VISION_MODEL},
-    tools::build_full_toolbox,
+    tools::{ToolBox, build_full_toolbox},
 };
 use chrono::Local;
 use termimad::MadSkin;
@@ -43,9 +43,8 @@ async fn main() -> anyhow::Result<()> {
     println!("正在初始化工具箱（启动 Expense MCP 子进程，请稍候）...");
     let toolbox = Arc::new(build_full_toolbox(VISION_MODEL).await?);
 
-    // 记录一份工具名清单用于展示（toolbox 本身要交给 Agent 持有）
-    let mut tool_names: Vec<String> = toolbox.keys().cloned().collect();
-    tool_names.sort();
+    // 按来源（MCP / 内置）对工具分组，用于启动展示（toolbox 本身要交给 Agent 持有）
+    let tool_groups = group_tools_by_source(&toolbox);
 
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let instructions = build_instructions(&now);
@@ -57,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         // web_search 结果过长时自动向量压缩，节省 token
         .with_after_tool_callback(Arc::new(SearchCompressorCallback));
 
-    print_banner(&tool_names);
+    print_banner(&tool_groups);
 
     // Markdown 终端渲染皮肤；render_markdown 控制是否启用（/raw 可切换）
     let skin = MadSkin::default();
@@ -93,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
             "/help" => {
-                print_help(&tool_names);
+                print_help(&tool_groups);
                 continue;
             }
             "/raw" => {
@@ -193,27 +192,63 @@ fn build_instructions(current_time: &str) -> String {
     )
 }
 
-fn print_banner(tool_names: &[String]) {
+fn print_banner(groups: &[(String, Vec<String>)]) {
+    let total: usize = groups.iter().map(|(_, t)| t.len()).sum();
     println!("\n============================================");
     println!("  全功能 AI Agent 已就绪 (DeepSeek + 多工具)");
     println!("============================================");
-    println!("已加载 {} 个工具：{}", tool_names.len(), tool_names.join(", "));
+    println!("已加载 {total} 个工具，按来源分组：");
+    print_tool_groups(groups);
     println!("输入问题开始对话；输入 /help 查看命令。");
 }
 
-fn print_help(tool_names: &[String]) {
+fn print_help(groups: &[(String, Vec<String>)]) {
     println!("\n可用命令：");
     println!("  /help    显示本帮助");
     println!("  /reset   清空对话记忆，重开一段会话");
     println!("  /tokens  查看本会话累计 token 用量");
     println!("  /raw     切换 Markdown 渲染 / 原始文本显示");
     println!("  /exit    退出（Ctrl-D 同样可退出）");
-    println!("\n已加载工具：{}", tool_names.join(", "));
-    println!("\n示例问题：");
+    println!("\n已加载工具（按来源分组）：");
+    print_tool_groups(groups);
+    println!("示例问题：");
     println!("  - 帮我算一下 1999 * 3 + 500 等于多少");
     println!("  - 搜一下最近的 AI 大新闻");
     println!("  - 我七月在 Food 分类上花了多少钱？");
-    println!("  - 读一下 /path/to/xxx.zip 里的内容并总结");
+    println!("  - 看看 github/github-mcp-server 最近的几个 issue");
+}
+
+/// 统一的分组打印：每个来源一行，列出其工具。
+fn print_tool_groups(groups: &[(String, Vec<String>)]) {
+    for (source, names) in groups {
+        println!("  【{}】({}) {}", source, names.len(), names.join(", "));
+    }
+}
+
+/// 按工具的 `source()` 把工具箱分组，返回 (来源, 工具名列表)。
+/// 分组顺序固定：内置工具在前，其余 MCP 来源按名称排序在后；组内工具名排序。
+fn group_tools_by_source(toolbox: &ToolBox) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
+
+    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for tool in toolbox.values() {
+        map.entry(tool.source().to_string())
+            .or_default()
+            .push(tool.name().to_string());
+    }
+
+    let mut groups: Vec<(String, Vec<String>)> = map.into_iter().collect();
+    // 组内按工具名排序
+    for (_, names) in groups.iter_mut() {
+        names.sort();
+    }
+    // "内置工具" 永远排在最前面
+    groups.sort_by(|a, b| match (a.0 == "内置工具", b.0 == "内置工具") {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.0.cmp(&b.0),
+    });
+    groups
 }
 
 /// 统计从 `events_before` 之后新增事件里各工具被调用的次数，按首次出现顺序返回。
