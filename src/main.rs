@@ -12,18 +12,20 @@
 //       · Expense MCP         费用记录的增删查改（子进程）
 //   - ApprovalCallback：delete_file 等高危操作执行前人工确认
 //   - SearchCompressorCallback：web_search 超长结果自动向量压缩（embedding 走 OpenRouter）
+//   - termimad：把模型返回的 Markdown 渲染成带样式的终端输出
 //
-// 交互命令：/help 帮助  /reset 清空记忆  /tokens 查看用量  /exit 退出
+// 交互命令：/help 帮助  /reset 清空记忆  /tokens 查看用量  /raw 切换Markdown渲染  /exit 退出
 use std::io::Write;
 use std::sync::Arc;
 
 use ai_agent::{
-    agent::{Agent, ExecutionContext},
+    agent::{Agent, ContentItem, ExecutionContext},
     callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback},
     constant::{DEEPSEEK_FLASH, VISION_MODEL},
     tools::build_full_toolbox,
 };
 use chrono::Local;
+use termimad::MadSkin;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -56,6 +58,10 @@ async fn main() -> anyhow::Result<()> {
         .with_after_tool_callback(Arc::new(SearchCompressorCallback));
 
     print_banner(&tool_names);
+
+    // Markdown 终端渲染皮肤；render_markdown 控制是否启用（/raw 可切换）
+    let skin = MadSkin::default();
+    let mut render_markdown = true;
 
     // 整个会话共用一个 context，实现多轮记忆
     let mut context = ExecutionContext::new();
@@ -90,16 +96,43 @@ async fn main() -> anyhow::Result<()> {
                 print_help(&tool_names);
                 continue;
             }
+            "/raw" => {
+                render_markdown = !render_markdown;
+                println!(
+                    "(Markdown 渲染已{})",
+                    if render_markdown { "开启" } else { "关闭" }
+                );
+                continue;
+            }
             _ => {}
         }
 
+        // 记录调用前的事件数，之后据此统计"本轮"新产生的工具调用
+        let events_before = context.events.len();
+
         match agent.chat(&mut context, input).await {
             Ok(output) => {
-                println!("\nAI > {output}");
+                println!("\nAI >");
+                if render_markdown {
+                    skin.print_text(&output);
+                } else {
+                    println!("{output}");
+                }
                 println!(
                     "  ↳ 本会话累计 token：{}（输入 /tokens 查看明细）",
                     context.usage.total_tokens
                 );
+                let tools_used = collect_tool_usage(&context, events_before);
+                if tools_used.is_empty() {
+                    println!("  ↳ 本次未调用工具");
+                } else {
+                    let summary = tools_used
+                        .iter()
+                        .map(|(name, count)| format!("{name}×{count}"))
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    println!("  ↳ 本次调用工具：{summary}");
+                }
             }
             Err(err) => {
                 eprintln!("\n[出错] {err}");
@@ -148,6 +181,7 @@ fn print_help(tool_names: &[String]) {
     println!("  /help    显示本帮助");
     println!("  /reset   清空对话记忆，重开一段会话");
     println!("  /tokens  查看本会话累计 token 用量");
+    println!("  /raw     切换 Markdown 渲染 / 原始文本显示");
     println!("  /exit    退出（Ctrl-D 同样可退出）");
     println!("\n已加载工具：{}", tool_names.join(", "));
     println!("\n示例问题：");
@@ -155,6 +189,23 @@ fn print_help(tool_names: &[String]) {
     println!("  - 搜一下最近的 AI 大新闻");
     println!("  - 我七月在 Food 分类上花了多少钱？");
     println!("  - 读一下 /path/to/xxx.zip 里的内容并总结");
+}
+
+/// 统计从 `events_before` 之后新增事件里各工具被调用的次数，按首次出现顺序返回。
+fn collect_tool_usage(context: &ExecutionContext, events_before: usize) -> Vec<(String, u32)> {
+    let mut usage: Vec<(String, u32)> = Vec::new();
+    for event in context.events.iter().skip(events_before) {
+        for item in &event.content {
+            if let ContentItem::ToolCall { name, .. } = item {
+                if let Some(entry) = usage.iter_mut().find(|(n, _)| n == name) {
+                    entry.1 += 1;
+                } else {
+                    usage.push((name.clone(), 1));
+                }
+            }
+        }
+    }
+    usage
 }
 
 /// 在阻塞线程里读取一行输入，避免阻塞 tokio 运行时。
