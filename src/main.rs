@@ -41,18 +41,23 @@ async fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     println!("正在初始化工具箱（启动 Expense MCP 子进程，请稍候）...");
-    let toolbox = Arc::new(build_full_toolbox(VISION_MODEL).await?);
+    // 加载技能（skills/ 目录），用于注入索引 + 构造 use_skill 工具
+    let skills = Arc::new(ai_agent::skill::load_skills("skills"));
+    if !skills.is_empty() {
+        println!("已加载 {} 个技能", skills.len());
+    }
+    let toolbox = Arc::new(build_full_toolbox(VISION_MODEL, skills.clone()).await?);
 
     // 按来源（MCP / 内置）对工具分组，用于启动展示（toolbox 本身要交给 Agent 持有）
     let tool_groups = group_tools_by_source(&toolbox);
 
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let instructions = build_instructions(&now, DEEPSEEK_FLASH);
+    let instructions = build_instructions(&now, DEEPSEEK_FLASH, &skills);
 
     let agent = Agent::new(DEEPSEEK_FLASH, Some(&instructions), toolbox)
         .with_max_steps(15)
-        // delete_file 属高危操作，执行前需人工确认
-        .with_before_tool_callback(Arc::new(ApprovalCallback::new(["delete_file"])))
+        // delete_file / run_script 属高危操作，执行前需人工确认
+        .with_before_tool_callback(Arc::new(ApprovalCallback::new(["delete_file", "run_script"])))
         // web_search 结果过长时自动向量压缩，节省 token
         .with_after_tool_callback(Arc::new(SearchCompressorCallback));
     let mut agent = agent;
@@ -113,12 +118,12 @@ async fn main() -> anyhow::Result<()> {
                     ),
                     "flash" => {
                         agent.set_model(DEEPSEEK_FLASH);
-                        agent.set_instructions(build_instructions(&now, DEEPSEEK_FLASH));
+                        agent.set_instructions(build_instructions(&now, DEEPSEEK_FLASH, &skills));
                         println!("(已切换到 flash：{DEEPSEEK_FLASH})");
                     }
                     "pro" => {
                         agent.set_model(DEEPSEEK_V4_PRO);
-                        agent.set_instructions(build_instructions(&now, DEEPSEEK_V4_PRO));
+                        agent.set_instructions(build_instructions(&now, DEEPSEEK_V4_PRO, &skills));
                         println!("(已切换到 pro：{DEEPSEEK_V4_PRO})");
                     }
                     other => println!("(未知模型 '{other}'，可用：flash / pro)"),
@@ -191,8 +196,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// 组装系统提示词：告诉模型它的身份、当前模型、有哪些能力、如何使用工具。
-fn build_instructions(current_time: &str, model: &str) -> String {
-    format!(
+fn build_instructions(current_time: &str, model: &str, skills: &[ai_agent::skill::Skill]) -> String {
+    let base = format!(
         r#"你是一位专业、可靠、乐于帮助用户的全能 AI 助手，基于 DeepSeek 大模型构建，
 当前运行的模型是 `{model}`。当用户问你是什么模型时，如实回答你基于 DeepSeek，当前模型为 `{model}`。
 
@@ -212,7 +217,10 @@ fn build_instructions(current_time: &str, model: &str) -> String {
 - 能直接回答就直接回答，不必为了用工具而用工具。
 - 需要外部数据时必须调用工具获取，不要凭空编造数据，也不要回答"我不知道"。
 - 工具返回结果后，直接据此给出自然、简洁、准确的回答，不要向用户复述工具调用过程。"#
-    )
+    );
+
+    // 追加技能索引（渐进式披露：这里只列 name+description，正文按需用 use_skill 加载）
+    format!("{base}{}", ai_agent::skill::build_skill_index(skills))
 }
 
 fn print_banner(groups: &[(String, Vec<String>)]) {

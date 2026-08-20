@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
+use crate::skill::Skill;
 use crate::tools::{
-    calculator::r#impl::CalculatorTool, file_delete::r#impl::DeleteFileTool, file_list::r#impl::ListFileTool, file_read::r#impl::ReadFileTool, file_unzip::r#impl::UnzipFileTool, mcp::{client::McpClient, tool::McpTool}, read_image::r#impl::ReadImageTool, tool::Tool, web_search::r#impl::WebSearchTool,
+    calculator::r#impl::CalculatorTool, file_delete::r#impl::DeleteFileTool, file_list::r#impl::ListFileTool, file_read::r#impl::ReadFileTool, file_unzip::r#impl::UnzipFileTool, mcp::{client::McpClient, tool::McpTool}, read_image::r#impl::ReadImageTool, run_script::RunScriptTool, tool::Tool, use_skill::UseSkillTool, web_search::r#impl::WebSearchTool,
 };
 
 pub mod calculator;
@@ -15,6 +16,9 @@ pub mod file_read;
 pub mod file_delete;
 
 pub mod read_image;
+
+pub mod use_skill;
+pub mod run_script;
 
 pub type ToolBox = HashMap<String, Box<dyn Tool>>;
 
@@ -30,15 +34,19 @@ pub async fn build_toolbox() -> anyhow::Result<ToolBox> {
     Ok(into_toolbox(tools))
 }
 
-/// 构建"全功能"工具箱：本地工具 + 文件工具 + MCP 工具，一次性都装进来。
+/// 构建"全功能"工具箱：本地工具 + 文件工具 + MCP 工具 + Skill 工具，一次性都装进来。
 /// 供 `cargo run` 启动的交互式 Agent 使用。
 ///
 /// 包含：
 /// - calculator：精确计算
 /// - web_search：Tavily 联网搜索
 /// - unzip / list_files / read_file / read_image / delete_file：文件探索
-/// - Expense MCP 暴露的费用管理工具（子进程）
-pub async fn build_full_toolbox(vision_model: impl Into<String>) -> anyhow::Result<ToolBox> {
+/// - use_skill / run_script：技能加载与脚本执行
+/// - Expense MCP / GitHub MCP 暴露的工具（子进程）
+pub async fn build_full_toolbox(
+    vision_model: impl Into<String>,
+    skills: Arc<Vec<Skill>>,
+) -> anyhow::Result<ToolBox> {
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(CalculatorTool),
         Box::new(WebSearchTool),
@@ -48,6 +56,13 @@ pub async fn build_full_toolbox(vision_model: impl Into<String>) -> anyhow::Resu
         Box::new(ReadImageTool::new(vision_model)),
         Box::new(DeleteFileTool),
     ];
+
+    // Skill 工具：use_skill 用于按需加载技能 SOP；run_script 用于执行技能脚本。
+    // 只有存在技能时才挂载这两个工具，避免空技能时徒增工具。
+    if !skills.is_empty() {
+        tools.push(Box::new(UseSkillTool::new(skills.clone())));
+        tools.push(Box::new(RunScriptTool));
+    }
 
     // 拉起 MCP Server（expense_mcp_server）并把它暴露的工具也装进来
     let mcp_client = Arc::new(McpClient::connect().await?);
