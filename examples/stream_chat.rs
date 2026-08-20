@@ -1,5 +1,11 @@
+// 示例：流式对话 + 并发限流
+// 步骤：准备 10 个问题 -> JoinSet 并发提交 -> 每个任务先抢信号量再流式请求 -> 汇总打印
+// 用到的功能：
+//   - chat_stream_with_retry：流式输出 + 指数退避重试（走 DeepSeek）
+//   - Semaphore：限制并发数，避免瞬间打爆 API
+//   - tracing span：给每个问题挂独立日志上下文
 use ai_agent::{
-    constant::GPT_4O_MINI_MODEL,
+    constant::DEEPSEEK_FLASH,
     llm::{
         semaphore::get_semaphore,
         stream::{chat_stream_with_retry},
@@ -40,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!("\n\n{prompt}");
                 let permit = get_semaphore().acquire().await?;
                 let output =
-                    chat_stream_with_retry(GPT_4O_MINI_MODEL, Some("你是一个全能助理"), prompt)
+                    chat_stream_with_retry(DEEPSEEK_FLASH, Some("你是一个全能助理"), prompt)
                         .await?;
                 drop(permit);
                 Ok::<_, anyhow::Error>((prompt, output))

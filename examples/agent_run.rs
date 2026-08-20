@@ -1,6 +1,12 @@
+// 示例：用封装好的 Agent::run 完成多步"购买分析"任务
+// 步骤：搜 Mac Mini 价格 -> 查近三月 Software 支出 -> 计算倍数/攒钱月数 -> 给出购买建议
+// 用到的功能：
+//   - Agent::run：多步自主循环（对话走 DeepSeek，max_steps=8）
+//   - build_toolbox：web_search（Tavily）+ calculator + expense MCP
+//   - ExecutionContext：记录步数、Event、token 用量等执行轨迹
 use std::sync::Arc;
 
-use ai_agent::{agent::Agent, constant::GPT_4O_MINI_MODEL, tools::build_toolbox};
+use ai_agent::{agent::Agent, constant::DEEPSEEK_FLASH, tools::build_toolbox};
 use chrono::Local;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -37,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         current_time
     );
 
-    let agent = Agent::new(GPT_4O_MINI_MODEL, Some(&instructions), toolbox).with_max_steps(8);
+    let agent = Agent::new(DEEPSEEK_FLASH, Some(&instructions), toolbox).with_max_steps(8);
 
     println!("\n=== Agent::run 测试 ===");
     let result = agent

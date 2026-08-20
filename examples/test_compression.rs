@@ -1,5 +1,10 @@
+// 示例：Agent + 搜索结果自动压缩
+// 步骤：Agent 收到问题 -> 调用 web_search -> 结果过长时用向量检索压缩 -> 只保留相关片段再回答
+// 用到的功能：
+//   - Agent::run：多步自主循环（对话走 DeepSeek，上限 5 步）
+//   - SearchCompressorCallback：after_tool 回调，对 web_search 结果做向量压缩（embedding 走 OpenRouter）
 use ai_agent::{
-    agent::Agent, callback::search_compressor::SearchCompressorCallback, constant::GPT_4O_MINI_MODEL, tools::build_toolbox,
+    agent::Agent, callback::search_compressor::SearchCompressorCallback, constant::DEEPSEEK_FLASH, tools::build_toolbox,
 };
 use std::sync::Arc;
 
@@ -13,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let toolbox = Arc::new(build_toolbox().await?);
 
     let agent = Agent::new(
-        GPT_4O_MINI_MODEL,
+        DEEPSEEK_FLASH,
         Some("你是一个善用网页搜索的助手".to_string()),
         toolbox,
     )

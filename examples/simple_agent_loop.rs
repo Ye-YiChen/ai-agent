@@ -1,4 +1,10 @@
-use ai_agent::{constant::GPT_4O_MINI_MODEL, llm::complete::chat_complete, tools::build_toolbox};
+// 示例：手写 Agent 循环，完成一个多步"购买分析"任务
+// 步骤：搜价格 -> 查我近三月 Software 支出 -> 计算倍数/攒钱月数 -> 给出购买建议
+// 用到的功能：
+//   - chat_complete：在内部反复"调用工具 -> 喂回结果"直到模型给出终答（走 DeepSeek）
+//   - build_toolbox：web_search（Tavily）+ calculator + expense MCP
+//   - 系统提示注入当前时间，处理相对时间语义
+use ai_agent::{constant::DEEPSEEK_FLASH, llm::complete::chat_complete, tools::build_toolbox};
 use chrono::Local;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -67,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\n=== 测试 0：Agent loop 测试 ===");
     let result = chat_complete(
-        GPT_4O_MINI_MODEL,
+        DEEPSEEK_FLASH,
         Some(&system_prompt),
         r"我想买一台 Mac Mini M4。
 
@@ -90,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     // // 测试 1：查询某个月某个分类的花销（应该会触发 get_summary 或 list_expenses）
     // println!("\n=== 测试 1：查询七月 Food 分类花销 ===");
     // let result = chat_complete(
-    //     GPT_4O_MINI_MODEL,
+    //     DEEPSEEK_FLASH,
     //     Some(&system_prompt),
     //     "我七月在 Food 这个分类上一共花了多少钱？",
     //     &toolbox,
@@ -101,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
     // // 测试 2：新增一笔支出（应该会触发 create_expense）
     // println!("\n=== 测试 2：新增一笔支出 ===");
     // let result = chat_complete(
-    //     GPT_4O_MINI_MODEL,
+    //     DEEPSEEK_FLASH,
     //     Some(&system_prompt),
     //     "帮我记一笔支出：今天在星巴克买咖啡花了 28 块钱，分类是 Food。然后在帮我统计一下七月份在food这个分类上的开销。",
     //     &toolbox,
@@ -115,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
     // // 不会因为每次请求而重置）
     // println!("\n=== 测试 3：七月整体费用汇总 ===");
     // let result = chat_complete(
-    //     GPT_4O_MINI_MODEL,
+    //     DEEPSEEK_FLASH,
     //     Some(&system_prompt),
     //     "帮我总结一下七月的费用情况，按分类列出来。",
     //     &toolbox,

@@ -13,7 +13,7 @@ pub async fn chat_complete_structured(
     system: Option<&str>, // 可选的系统消息，用于设置对话的上下文
     prompt: &str, // 用户的输入消息
 ) -> anyhow::Result<ActionPlan> {
-    let client = async_openai::Client::new();
+    let client = crate::llm::client::deepseek_client()?;
     let mut messages = vec![];
 
     // 这里是将系统消息添加到消息列表中，如果提供了系统消息的话ß

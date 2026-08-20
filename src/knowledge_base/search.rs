@@ -3,7 +3,7 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 use anyhow::Ok;
 
 use crate::{
-    constant::TEXT_EMBEDDING_3_SMALL_MODEL,
+    constant::TEXT_EMBEDDING_MODEL,
     knowledge_base::embed::{embed_text, embed_texts},
 };
 
@@ -57,8 +57,8 @@ pub async fn vector_search(
         return Ok(Vec::new());
     }
 
-    let query_embedding = embed_text(query, TEXT_EMBEDDING_3_SMALL_MODEL).await?;
-    let chunk_embeddings = embed_texts(chunks, TEXT_EMBEDDING_3_SMALL_MODEL).await?;
+    let query_embedding = embed_text(query, TEXT_EMBEDDING_MODEL).await?;
+    let chunk_embeddings = embed_texts(chunks, TEXT_EMBEDDING_MODEL).await?;
 
     let mut heap: BinaryHeap<ScoredIndex> = BinaryHeap::with_capacity(top_k + 1);
     for (index, embedding) in chunk_embeddings.iter().enumerate() {

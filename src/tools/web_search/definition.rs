@@ -1,4 +1,6 @@
-use async_openai::types::chat::ChatCompletionTools;
+use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObjectArgs};
+use serde_json::json;
+
 pub fn web_search_tool_definition() -> ChatCompletionTools {
     ChatCompletionTools::Function(ChatCompletionTool {
         function: FunctionObjectArgs::default()

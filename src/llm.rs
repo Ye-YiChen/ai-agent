@@ -1,3 +1,4 @@
+pub mod client;
 pub mod complete;
 pub mod structured;
 pub mod stream;

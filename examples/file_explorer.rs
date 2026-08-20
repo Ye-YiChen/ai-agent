@@ -1,6 +1,14 @@
+// 示例：文件探索 Agent（解压包 -> 找出最合适候选人 -> 删掉用完的文件）
+// 步骤：解压 zip -> list_files 看目录 -> read_file/read_image 逐一确认 -> 得出结论 -> 删除指定文件
+// 用到的功能：
+//   - Agent::run：多步自主探索（对话走 DeepSeek，上限 20 步）
+//   - build_file_explorer_toolbox：unzip / list / read / read_image / delete 工具
+//   - ApprovalCallback：delete_file 等高危操作先过人工审批
+//   - SearchCompressorCallback：超长结果自动压缩
+//   - VISION_MODEL：读图走 OpenRouter 多模态模型
 use std::sync::Arc;
 
-use ai_agent::{agent::Agent, callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback}, constant::{GPT_4O_MINI_MODEL, VISION_MODEL}, tools::build_file_explorer_toolbox};
+use ai_agent::{agent::Agent, callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback}, constant::{DEEPSEEK_FLASH, VISION_MODEL}, tools::build_file_explorer_toolbox};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -21,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
 靠文件名判断哪些文件可能相关，用 read_file 或 read_image 逐一确认，
 最后再给出结论。不要跳过探索步骤直接猜答案。"#;
 
-    let agent = Agent::new(GPT_4O_MINI_MODEL, Some(instructions), toolbox)
+    let agent = Agent::new(DEEPSEEK_FLASH, Some(instructions), toolbox)
         .with_max_steps(20)
         // 高危操作先过人工审批 —— delete_file 在名单里，其他文件工具都不需要审批
         .with_before_tool_callback(Arc::new(ApprovalCallback::new(["delete_file"])))

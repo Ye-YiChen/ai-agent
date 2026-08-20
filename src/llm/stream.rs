@@ -12,7 +12,7 @@ fn chat_stream(
     prompt: &str,
 ) -> impl Stream<Item = anyhow::Result<String>> {
     stream! {
-        let client = async_openai::Client::new();
+        let client = crate::llm::client::deepseek_client()?;
         let mut messages = vec![];
 
         if let Some(system) = system {

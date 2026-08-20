@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use ai_agent::{
-    constant::GPT_4O_MINI_MODEL,
+    constant::DEEPSEEK_FLASH,
     gaia::{
         dataset::load_gaia_level1,
         evaluator::{evaluate_gaia_single, evaluate_gaia_single_with_tools},
@@ -36,7 +36,7 @@ pub async fn gaia_level1_experiment() -> anyhow::Result<()> {
         let problem = problem.clone();
         set.spawn(async move {
             let permit = get_semaphore().acquire().await?;
-            let eval = evaluate_gaia_single(problem, GPT_4O_MINI_MODEL).await;
+            let eval = evaluate_gaia_single(problem, DEEPSEEK_FLASH).await;
             drop(permit);
             Ok::<_, anyhow::Error>(("without_tools", eval))
         });
@@ -47,7 +47,7 @@ pub async fn gaia_level1_experiment() -> anyhow::Result<()> {
         let toolbox = toolbox.clone();
         set.spawn(async move {
             let permit = get_semaphore().acquire().await?;
-            let eval = evaluate_gaia_single_with_tools(problem, GPT_4O_MINI_MODEL, toolbox).await;
+            let eval = evaluate_gaia_single_with_tools(problem, DEEPSEEK_FLASH, toolbox).await;
             drop(permit);
             Ok::<_, anyhow::Error>(("with_tools", eval))
         });

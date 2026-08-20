@@ -31,7 +31,7 @@ async fn solve_problem(model: &str, system: &str, prompt: &str) -> anyhow::Resul
         },
     };
 
-    let client = async_openai::Client::new();
+    let client = crate::llm::client::deepseek_client()?;
     let request = CreateChatCompletionRequestArgs::default()
         .model(model)
         .messages([

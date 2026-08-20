@@ -1,3 +1,10 @@
+// 示例：RAG 式检索压缩演示（对比"全塞给模型" vs "只留相关片段"）
+// 步骤：宽泛联网搜索 -> 统计原文 token -> 切成重叠小块 -> 向量检索取 Top-3 -> 对比压缩前后 token
+// 用到的功能：
+//   - search_web：Tavily 联网搜索（需 TAVILY_API_KEY）
+//   - fixed_length_chunking：定长重叠分块
+//   - vector_search：按余弦相似度做向量检索（embedding 走 OpenRouter）
+//   - tiktoken(cl100k_base)：本地估算 token 数
 use ai_agent::{
     knowledge_base::{chunk::fixed_length_chunking, search::vector_search},
     tools::web_search::execute::{WebSearchArgs, search_web},

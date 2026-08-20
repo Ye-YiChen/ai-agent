@@ -1,3 +1,9 @@
+// 示例：单轮对话中的工具调用（Function Calling）
+// 步骤：构建工具箱 -> 向模型提问需要联网才能答的问题 -> 模型自动调用 web_search -> 拿结果生成回答
+// 用到的功能：
+//   - chat_complete：内置一轮"调用工具再回答"的循环（走 DeepSeek）
+//   - build_toolbox：calculator + web_search + expense MCP 工具
+//   - Tavily 联网搜索（需 TAVILY_API_KEY）
 use ai_agent::{constant::DEEPSEEK_FLASH, llm::complete::chat_complete, tools::build_toolbox};
 use anyhow::Ok;
 use tracing::Level;

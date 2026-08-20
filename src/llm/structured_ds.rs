@@ -13,7 +13,7 @@ pub async fn chat_complete_structured_ds(
     mode: &str, // 模型名称，例如 "deepseek-v4-flash"
     prompt: &str, // 用户的输入消息
 ) -> anyhow::Result<ActionPlan> {
-    let client = async_openai::Client::new();
+    let client = crate::llm::client::deepseek_client()?;
     let mut messages = vec![];
 
     // 这里是将系统消息添加到消息列表中

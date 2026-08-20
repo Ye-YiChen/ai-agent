@@ -84,7 +84,7 @@ impl Agent {
             }],
         ));
 
-        let client = async_openai::Client::new();
+        let client = crate::llm::client::deepseek_client()?;
 
         let tool_definitions: Vec<ChatCompletionTools> = self
             .toolbox
@@ -179,7 +179,7 @@ impl Agent {
             }],
         ));
 
-        let client = async_openai::Client::new();
+        let client = crate::llm::client::deepseek_client()?;
 
         let mut tool_definitions: Vec<ChatCompletionTools> = self
             .toolbox
