@@ -4,11 +4,12 @@ use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
     ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestToolMessageArgs,
-    ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionToolChoiceOption,
-    ChatCompletionTools, CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs,
-    ToolChoiceOptions,
+    ChatCompletionRequestUserMessageArgs, ChatCompletionStreamOptions, ChatCompletionTool,
+    ChatCompletionToolChoiceOption, ChatCompletionTools, CreateChatCompletionRequestArgs,
+    FunctionCall, FunctionObjectArgs, ToolChoiceOptions,
 };
 use backon::{ExponentialBuilder, Retryable};
+use futures::StreamExt;
 use serde_json::Value;
 
 use crate::{
@@ -171,6 +172,172 @@ impl Agent {
             }
 
             context.increment_step();
+        }
+    }
+
+    /// 流式版本的 `chat`：最终回答会随生成逐段通过 `on_delta` 回调吐出，
+    /// 实现终端"打字机"效果。工具调用阶段不产生流式文本（分片会被聚合后执行）。
+    ///
+    /// - `on_delta`：最终回答的增量文本
+    /// - `on_tool`：工具阶段进度通知（开始执行 / 执行完毕），可用于展示"正在调用 xxx"
+    ///
+    /// 与 `chat` 一样在传入的 `context` 上累积历史，实现多轮记忆。
+    pub async fn chat_stream<F, G>(
+        &self,
+        context: &mut ExecutionContext,
+        user_input: &str,
+        mut on_delta: F,
+        mut on_tool: G,
+    ) -> anyhow::Result<String>
+    where
+        F: FnMut(&str),
+        G: FnMut(ToolProgress<'_>),
+    {
+        context.current_step = 0;
+        context.final_result = None;
+
+        context.add_event(Event::new(
+            context.execution_id.clone(),
+            "user",
+            vec![ContentItem::Message {
+                role: "user".to_string(),
+                content: user_input.to_string(),
+            }],
+        ));
+
+        let client = crate::llm::client::deepseek_client()?;
+
+        let tool_definitions: Vec<ChatCompletionTools> = self
+            .toolbox
+            .values()
+            .filter_map(|t| match t.definition() {
+                Ok(def) => Some(def),
+                Err(e) => {
+                    tracing::warn!("Skip tool {}, failed to get its definition: {e}", t.name());
+                    None
+                }
+            })
+            .collect();
+
+        loop {
+            if context.current_step >= self.max_steps {
+                anyhow::bail!(
+                    "Agent exceeded the maximum of {} steps without a final answer",
+                    self.max_steps
+                );
+            }
+
+            let messages = self.build_messages(context)?;
+
+            let request = CreateChatCompletionRequestArgs::default()
+                .model(self.model.clone())
+                .messages(messages)
+                .tools(tool_definitions.clone())
+                .max_tokens(2048u32)
+                // 请求在末尾额外返回一个带 usage 的 chunk，用于 token 统计
+                .stream_options(ChatCompletionStreamOptions {
+                    include_usage: Some(true),
+                    include_obfuscation: None,
+                })
+                .build()?;
+
+            let mut stream = client.chat().create_stream(request).await?;
+
+            let mut content = String::new();
+            // 按 index 聚合本轮的 tool_call 分片（name / arguments 都是增量拼接）
+            let mut tool_accum: Vec<ToolCallAccum> = Vec::new();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+
+                if let Some(usage) = &chunk.usage {
+                    context.usage.add(
+                        usage.prompt_tokens,
+                        usage.completion_tokens,
+                        usage.total_tokens,
+                    );
+                }
+
+                let Some(choice) = chunk.choices.into_iter().next() else {
+                    continue;
+                };
+                let delta = choice.delta;
+
+                if let Some(text) = &delta.content
+                    && !text.is_empty()
+                {
+                    content.push_str(text);
+                    on_delta(text);
+                }
+
+                if let Some(tool_calls) = delta.tool_calls {
+                    for tc in tool_calls {
+                        let idx = tc.index as usize;
+                        if tool_accum.len() <= idx {
+                            tool_accum.resize_with(idx + 1, ToolCallAccum::default);
+                        }
+                        let acc = &mut tool_accum[idx];
+                        if let Some(id) = tc.id {
+                            acc.id = id;
+                        }
+                        if let Some(func) = tc.function {
+                            if let Some(name) = func.name {
+                                acc.name.push_str(&name);
+                            }
+                            if let Some(args) = func.arguments {
+                                acc.arguments.push_str(&args);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 过滤掉没有名字的空聚合项（防御性处理）
+            let tool_calls: Vec<ChatCompletionMessageToolCalls> = tool_accum
+                .into_iter()
+                .filter(|acc| !acc.name.is_empty())
+                .map(|acc| {
+                    ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                        id: acc.id,
+                        function: FunctionCall {
+                            name: acc.name,
+                            arguments: acc.arguments,
+                        },
+                    })
+                })
+                .collect();
+
+            if !tool_calls.is_empty() {
+                self.record_tool_calls(context, &tool_calls);
+
+                // 通知调用方：本轮即将执行哪些工具
+                let tool_names: Vec<String> = tool_calls
+                    .iter()
+                    .filter_map(|tc| match tc {
+                        ChatCompletionMessageToolCalls::Function(f) => {
+                            Some(f.function.name.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                on_tool(ToolProgress::Start(&tool_names));
+
+                self.execute_tool_calls(context, &tool_calls).await;
+
+                on_tool(ToolProgress::Done(&tool_names));
+                context.increment_step();
+            } else {
+                context.add_event(Event::new(
+                    context.execution_id.clone(),
+                    "agent",
+                    vec![ContentItem::Message {
+                        role: "assistant".to_string(),
+                        content: content.clone(),
+                    }],
+                ));
+                context.final_result = Some(content.clone());
+                return Ok(content);
+            }
         }
     }
 
@@ -487,4 +654,21 @@ fn final_answer_tool_definition<T: schemars::JsonSchema>() -> anyhow::Result<Cha
     Ok(ChatCompletionTools::Function(ChatCompletionTool {
         function,
     }))
+}
+
+/// 流式响应里 tool_call 分片的聚合缓冲：name / arguments 会分多个 chunk 增量到达。
+#[derive(Default)]
+struct ToolCallAccum {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+/// 工具阶段进度事件，用于在流式对话里展示"正在调用 xxx"之类的提示。
+#[derive(Debug, Clone, Copy)]
+pub enum ToolProgress<'a> {
+    /// 即将开始执行这些工具
+    Start(&'a [String]),
+    /// 这些工具执行完毕
+    Done(&'a [String]),
 }

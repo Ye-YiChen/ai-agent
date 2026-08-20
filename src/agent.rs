@@ -5,4 +5,4 @@ pub mod callback;
 
 pub use context::ExecutionContext;
 pub use event::{ContentItem, Event, ToolResultStatus};
-pub use runtime::{Agent, AgentResult};
+pub use runtime::{Agent, AgentResult, ToolProgress};

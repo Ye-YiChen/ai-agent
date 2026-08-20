@@ -2,7 +2,7 @@
 use anyhow::Ok;
 use async_openai::types::chat::{
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs, 
-    CreateChatCompletionRequestArgs, ResponseFormatJsonSchema, ResponseFormat,
+    CreateChatCompletionRequestArgs, ResponseFormat,
 };
 use schemars::schema_for;
 

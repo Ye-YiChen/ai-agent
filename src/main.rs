@@ -19,7 +19,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 use ai_agent::{
-    agent::{Agent, ContentItem, ExecutionContext},
+    agent::{Agent, ContentItem, ExecutionContext, ToolProgress},
     callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback},
     constant::{DEEPSEEK_FLASH, VISION_MODEL},
     tools::build_full_toolbox,
@@ -110,13 +110,38 @@ async fn main() -> anyhow::Result<()> {
         // 记录调用前的事件数，之后据此统计"本轮"新产生的工具调用
         let events_before = context.events.len();
 
-        match agent.chat(&mut context, input).await {
+        print!("\nAI > ");
+        std::io::stdout().flush().ok();
+
+        // 流式输出：每个 token 到达即打印，形成打字机效果
+        let stream_result = agent
+            .chat_stream(
+                &mut context,
+                input,
+                |delta| {
+                    print!("{delta}");
+                    std::io::stdout().flush().ok();
+                },
+                |progress| match progress {
+                    ToolProgress::Start(names) => {
+                        println!("\n  ⚙ 正在调用工具：{} ...", names.join("、"));
+                    }
+                    ToolProgress::Done(names) => {
+                        println!("  ✓ 工具完成：{}，继续思考...\n", names.join("、"));
+                        print!("AI > ");
+                        std::io::stdout().flush().ok();
+                    }
+                },
+            )
+            .await;
+        println!();
+
+        match stream_result {
             Ok(output) => {
-                println!("\nAI >");
-                if render_markdown {
+                // 流式过程打印的是裸文本；若开启 Markdown 渲染，结束后再重绘一遍带样式的版本
+                if render_markdown && !output.trim().is_empty() {
+                    println!("---");
                     skin.print_text(&output);
-                } else {
-                    println!("{output}");
                 }
                 println!(
                     "  ↳ 本会话累计 token：{}（输入 /tokens 查看明细）",
