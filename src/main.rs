@@ -54,10 +54,17 @@ async fn main() -> anyhow::Result<()> {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let instructions = build_instructions(&now, DEEPSEEK_FLASH, &skills);
 
+    // 单独持有审批回调，便于每轮提问前 reset（"本轮一直允许"不跨轮延续）
+    let approval = Arc::new(ApprovalCallback::new([
+        "delete_file",
+        "run_script",
+        "download_file",
+    ]));
+
     let agent = Agent::new(DEEPSEEK_FLASH, Some(&instructions), toolbox)
-        .with_max_steps(15)
-        // delete_file / run_script 属高危操作，执行前需人工确认
-        .with_before_tool_callback(Arc::new(ApprovalCallback::new(["delete_file", "run_script"])))
+        .with_max_steps(50)
+        // delete_file / run_script / download_file 属高危操作，执行前需人工确认
+        .with_before_tool_callback(approval.clone())
         // web_search 结果过长时自动向量压缩，节省 token
         .with_after_tool_callback(Arc::new(SearchCompressorCallback));
     let mut agent = agent;
@@ -132,6 +139,9 @@ async fn main() -> anyhow::Result<()> {
             }
             _ => {}
         }
+
+        // 新一轮提问：清空上一轮的"一直允许"记录，本轮需重新授权
+        approval.reset();
 
         // 记录调用前的事件数，之后据此统计"本轮"新产生的工具调用
         let events_before = context.events.len();

@@ -1,4 +1,8 @@
-use std::{collections::HashSet, io::Write};
+use std::{
+    collections::HashSet,
+    io::Write,
+    sync::Mutex,
+};
 
 use crate::agent::{
     ExecutionContext,
@@ -7,12 +11,23 @@ use crate::agent::{
 
 pub struct ApprovalCallback {
     dangerous_tools: HashSet<String>,
+    /// 用户选择"本任务内一直允许"的工具名，命中则后续不再询问。
+    always_allowed: Mutex<HashSet<String>>,
 }
 
 impl ApprovalCallback {
     pub fn new(dangerous_tools: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             dangerous_tools: dangerous_tools.into_iter().map(Into::into).collect(),
+            always_allowed: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// 清空"本轮一直允许"的记录。应在每次用户新提问开始时调用，
+    /// 使得上一轮选择的 'a'(一直允许) 不会延续到下一轮提问。
+    pub fn reset(&self) {
+        if let Ok(mut set) = self.always_allowed.lock() {
+            set.clear();
         }
     }
 }
@@ -28,6 +43,16 @@ impl BeforeToolCallback for ApprovalCallback {
             return None;
         }
 
+        // 用户此前对该工具选择过"本任务内一直允许"，则不再询问
+        if self
+            .always_allowed
+            .lock()
+            .map(|s| s.contains(tool_call.name))
+            .unwrap_or(false)
+        {
+            return None;
+        }
+
         println!("\n⚠️  即将执行高危操作");
         println!("工具: {}", tool_call.name);
         println!("参数: {}", tool_call.arguments);
@@ -38,22 +63,33 @@ impl BeforeToolCallback for ApprovalCallback {
             println!("🚨 检测到潜在危险片段: {}", dangers.join("、"));
         }
 
-        let approved = tokio::task::spawn_blocking(|| {
-            print!("是否执行？(y/N): ");
+        // 返回：'y'=本次允许，'a'=本任务内该工具一直允许，其它(含回车)=拒绝
+        let choice = tokio::task::spawn_blocking(|| {
+            print!("是否执行？(y=本次 / a=本任务内不再询问 / N=拒绝): ");
             std::io::stdout().flush().ok();
             let mut input = String::new();
             std::io::stdin().read_line(&mut input).ok();
-            input.trim().eq_ignore_ascii_case("y")
+            input.trim().to_lowercase()
         })
         .await
-        .unwrap_or(false);
+        .unwrap_or_default();
 
-        if approved {
-            println!("✅ 已批准，继续执行...\n");
-            None
-        } else {
-            println!("❌ 已拒绝，跳过执行\n");
-            Some(format!("User denied execution of {}", tool_call.name))
+        match choice.as_str() {
+            "a" => {
+                if let Ok(mut set) = self.always_allowed.lock() {
+                    set.insert(tool_call.name.to_string());
+                }
+                println!("✅ 已批准，且本任务内不再询问 {}\n", tool_call.name);
+                None
+            }
+            "y" => {
+                println!("✅ 已批准，继续执行...\n");
+                None
+            }
+            _ => {
+                println!("❌ 已拒绝，跳过执行\n");
+                Some(format!("User denied execution of {}", tool_call.name))
+            }
         }
     }
 }
