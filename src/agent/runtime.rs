@@ -63,6 +63,21 @@ impl Agent {
         self
     }
 
+    /// 运行时切换模型（用于 `/model` 之类的交互命令）。
+    pub fn set_model(&mut self, model: impl Into<String>) {
+        self.model = model.into();
+    }
+
+    /// 当前使用的模型名。
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// 运行时更新系统提示词（用于切换模型后同步身份说明等）。
+    pub fn set_instructions(&mut self, instructions: impl Into<String>) {
+        self.instructions = Some(instructions.into());
+    }
+
     pub fn with_before_tool_callback(mut self, callback: Arc<dyn BeforeToolCallback>) -> Self {
         self.before_tool_callbacks.push(callback);
         self

@@ -14,14 +14,14 @@
 //   - SearchCompressorCallback：web_search 超长结果自动向量压缩（embedding 走 OpenRouter）
 //   - termimad：把模型返回的 Markdown 渲染成带样式的终端输出
 //
-// 交互命令：/help 帮助  /reset 清空记忆  /tokens 查看用量  /raw 切换Markdown渲染  /exit 退出
+// 交互命令：/help 帮助  /reset 清空记忆  /tokens 查看用量  /model 切换模型  /raw 切换Markdown渲染  /exit 退出
 use std::io::Write;
 use std::sync::Arc;
 
 use ai_agent::{
     agent::{Agent, ContentItem, ExecutionContext, ToolProgress},
     callback::{approval::ApprovalCallback, search_compressor::SearchCompressorCallback},
-    constant::{DEEPSEEK_FLASH, VISION_MODEL},
+    constant::{DEEPSEEK_FLASH, DEEPSEEK_V4_PRO, VISION_MODEL},
     tools::{ToolBox, build_full_toolbox},
 };
 use chrono::Local;
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     let tool_groups = group_tools_by_source(&toolbox);
 
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let instructions = build_instructions(&now);
+    let instructions = build_instructions(&now, DEEPSEEK_FLASH);
 
     let agent = Agent::new(DEEPSEEK_FLASH, Some(&instructions), toolbox)
         .with_max_steps(15)
@@ -55,8 +55,10 @@ async fn main() -> anyhow::Result<()> {
         .with_before_tool_callback(Arc::new(ApprovalCallback::new(["delete_file"])))
         // web_search 结果过长时自动向量压缩，节省 token
         .with_after_tool_callback(Arc::new(SearchCompressorCallback));
+    let mut agent = agent;
 
     print_banner(&tool_groups);
+    println!("当前模型：{}（用 /model 可切换 flash/pro）", agent.model());
 
     // Markdown 终端渲染皮肤；render_markdown 控制是否启用（/raw 可切换）
     let skin = MadSkin::default();
@@ -101,6 +103,26 @@ async fn main() -> anyhow::Result<()> {
                     "(Markdown 渲染已{})",
                     if render_markdown { "开启" } else { "关闭" }
                 );
+                continue;
+            }
+            cmd if cmd.starts_with("/model") => {
+                match cmd.strip_prefix("/model").unwrap_or("").trim() {
+                    "" => println!(
+                        "(当前模型：{}；用 /model flash 或 /model pro 切换)",
+                        agent.model()
+                    ),
+                    "flash" => {
+                        agent.set_model(DEEPSEEK_FLASH);
+                        agent.set_instructions(build_instructions(&now, DEEPSEEK_FLASH));
+                        println!("(已切换到 flash：{DEEPSEEK_FLASH})");
+                    }
+                    "pro" => {
+                        agent.set_model(DEEPSEEK_V4_PRO);
+                        agent.set_instructions(build_instructions(&now, DEEPSEEK_V4_PRO));
+                        println!("(已切换到 pro：{DEEPSEEK_V4_PRO})");
+                    }
+                    other => println!("(未知模型 '{other}'，可用：flash / pro)"),
+                }
                 continue;
             }
             _ => {}
@@ -168,10 +190,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 组装系统提示词：告诉模型有哪些能力、如何使用工具。
-fn build_instructions(current_time: &str) -> String {
+/// 组装系统提示词：告诉模型它的身份、当前模型、有哪些能力、如何使用工具。
+fn build_instructions(current_time: &str, model: &str) -> String {
     format!(
-        r#"你是一位专业、可靠、乐于帮助用户的全能 AI 助手，运行在一个命令行 Agent 里。
+        r#"你是一位专业、可靠、乐于帮助用户的全能 AI 助手，基于 DeepSeek 大模型构建，
+当前运行的模型是 `{model}`。当用户问你是什么模型时，如实回答你基于 DeepSeek，当前模型为 `{model}`。
 
 当前本地时间：{current_time}
 请把"今天""昨天""本周""上个月"等相对时间，都理解为相对于上面的当前时间。
@@ -207,6 +230,7 @@ fn print_help(groups: &[(String, Vec<String>)]) {
     println!("  /help    显示本帮助");
     println!("  /reset   清空对话记忆，重开一段会话");
     println!("  /tokens  查看本会话累计 token 用量");
+    println!("  /model   查看/切换模型（/model flash | /model pro）");
     println!("  /raw     切换 Markdown 渲染 / 原始文本显示");
     println!("  /exit    退出（Ctrl-D 同样可退出）");
     println!("\n已加载工具（按来源分组）：");
