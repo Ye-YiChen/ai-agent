@@ -74,6 +74,22 @@ impl Agent {
 
     pub async fn run(&self, user_input: &str) -> anyhow::Result<AgentResult> {
         let mut context = ExecutionContext::new();
+        let output = self.chat(&mut context, user_input).await?;
+        Ok(AgentResult { output, context })
+    }
+
+    /// 在已有的 `ExecutionContext` 上继续一轮对话，用于多轮交互（会保留历史事件）。
+    ///
+    /// 每次调用会把本轮的步数计数清零，因此 `max_steps` 是"单轮内的工具调用上限"，
+    /// 而历史对话（events）会一直累积，实现多轮记忆。
+    pub async fn chat(
+        &self,
+        context: &mut ExecutionContext,
+        user_input: &str,
+    ) -> anyhow::Result<String> {
+        // 本轮步数从 0 开始计（历史 events 仍保留，用于记忆）
+        context.current_step = 0;
+        context.final_result = None;
 
         context.add_event(Event::new(
             context.execution_id.clone(),
@@ -106,7 +122,7 @@ impl Agent {
                 );
             }
 
-            let messages = self.build_messages(&context)?;
+            let messages = self.build_messages(context)?;
 
             let request = CreateChatCompletionRequestArgs::default()
                 .model(self.model.clone())
@@ -135,8 +151,8 @@ impl Agent {
                 .message;
 
             if let Some(tool_calls) = message.tool_calls {
-                self.record_tool_calls(&mut context, &tool_calls);
-                self.execute_tool_calls(&mut context, &tool_calls).await;
+                self.record_tool_calls(context, &tool_calls);
+                self.execute_tool_calls(context, &tool_calls).await;
             } else {
                 let content = message
                     .content
@@ -151,10 +167,7 @@ impl Agent {
                     }],
                 ));
                 context.final_result = Some(content.clone());
-                return Ok(AgentResult {
-                    output: content,
-                    context,
-                });
+                return Ok(content);
             }
 
             context.increment_step();

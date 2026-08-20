@@ -30,6 +30,34 @@ pub async fn build_toolbox() -> anyhow::Result<ToolBox> {
     Ok(into_toolbox(tools))
 }
 
+/// 构建"全功能"工具箱：本地工具 + 文件工具 + MCP 工具，一次性都装进来。
+/// 供 `cargo run` 启动的交互式 Agent 使用。
+///
+/// 包含：
+/// - calculator：精确计算
+/// - web_search：Tavily 联网搜索
+/// - unzip / list_files / read_file / read_image / delete_file：文件探索
+/// - Expense MCP 暴露的费用管理工具（子进程）
+pub async fn build_full_toolbox(vision_model: impl Into<String>) -> anyhow::Result<ToolBox> {
+    let mut tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(CalculatorTool),
+        Box::new(WebSearchTool),
+        Box::new(UnzipFileTool),
+        Box::new(ListFileTool),
+        Box::new(ReadFileTool),
+        Box::new(ReadImageTool::new(vision_model)),
+        Box::new(DeleteFileTool),
+    ];
+
+    // 拉起 MCP Server（expense_mcp_server）并把它暴露的工具也装进来
+    let mcp_client = Arc::new(McpClient::connect().await?);
+    for tool in mcp_client.list_tools().await? {
+        tools.push(Box::new(McpTool::new(mcp_client.clone(), tool)));
+    }
+
+    Ok(into_toolbox(tools))
+}
+
 pub fn build_file_explorer_toolbox(vision_model: impl Into<String>) -> ToolBox {
     let tools: Vec<Box<dyn Tool>> = vec![
         Box::new(UnzipFileTool),
