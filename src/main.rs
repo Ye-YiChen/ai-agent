@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     // 交互体验优先：默认只打印 WARN 及以上，避免工具日志刷屏。
     // 想看详细执行过程可设环境变量 RUST_LOG=info。
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::WARN)
+        .with_max_level(Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
@@ -59,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
         "delete_file",
         "run_script",
         "download_file",
+        "write_file",
     ]));
 
     let agent = Agent::new(DEEPSEEK_FLASH, Some(&instructions), toolbox)

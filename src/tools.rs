@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::skill::Skill;
 use crate::tools::{
-    calculator::r#impl::CalculatorTool, file_delete::r#impl::DeleteFileTool, file_download::DownloadFileTool, file_list::r#impl::ListFileTool, file_read::r#impl::ReadFileTool, file_unzip::r#impl::UnzipFileTool, mcp::{client::McpClient, tool::McpTool}, read_image::r#impl::ReadImageTool, run_script::RunScriptTool, tool::Tool, use_skill::UseSkillTool, web_search::r#impl::WebSearchTool,
+    calculator::r#impl::CalculatorTool, file_delete::r#impl::DeleteFileTool, file_download::DownloadFileTool, file_list::r#impl::ListFileTool, file_read::r#impl::ReadFileTool, file_unzip::r#impl::UnzipFileTool, file_write::r#impl::WriteFileTool, mcp::{client::McpClient, tool::McpTool}, read_image::r#impl::ReadImageTool, run_script::RunScriptTool, tool::Tool, use_skill::UseSkillTool, web_search::r#impl::WebSearchTool,
 };
 
 pub mod calculator;
@@ -15,6 +15,7 @@ pub mod file_list;
 pub mod file_read;
 pub mod file_delete;
 pub mod file_download;
+pub mod file_write;
 
 pub mod read_image;
 
@@ -57,6 +58,7 @@ pub async fn build_full_toolbox(
         Box::new(ReadImageTool::new(vision_model)),
         Box::new(DeleteFileTool),
         Box::new(DownloadFileTool),
+        Box::new(WriteFileTool),
     ];
 
     // Skill 工具：use_skill 用于按需加载技能 SOP；run_script 用于执行技能脚本。

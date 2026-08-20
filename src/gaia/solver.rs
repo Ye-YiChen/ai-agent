@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use anyhow::Ok;
 use async_openai::types::chat::{
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    CreateChatCompletionRequestArgs, FinishReason, ResponseFormat, ResponseFormatJsonSchema,
+    CreateChatCompletionRequestArgs, FinishReason, ResponseFormat,
 };
 use backon::{ExponentialBuilder, Retryable};
 
@@ -20,16 +19,8 @@ pub async fn solve_problem_with_retry(
 }
 
 async fn solve_problem(model: &str, system: &str, prompt: &str) -> anyhow::Result<GaiaOutput> {
-    let schema = schemars::schema_for!(GaiaOutput);
-    let schema_json = serde_json::to_value(&schema)?;
-    let format_setting = ResponseFormat::JsonSchema {
-        json_schema: ResponseFormatJsonSchema {
-            description: Some("GAIA problem solving output".into()),
-            name: "gaia_output".into(),
-            schema: schema_json,
-            strict: Some(true),
-        },
-    };
+    // DeepSeek 不支持严格 json_schema，改用 json_object（prompt 里需含 "json" 字样）
+    let format_setting = ResponseFormat::JsonObject;
 
     let client = crate::llm::client::deepseek_client()?;
     let request = CreateChatCompletionRequestArgs::default()
@@ -40,7 +31,7 @@ async fn solve_problem(model: &str, system: &str, prompt: &str) -> anyhow::Resul
                 .build()?
                 .into(),
             ChatCompletionRequestUserMessageArgs::default()
-                .content(prompt)
+                .content(json_prompt(prompt))
                 .build()?
                 .into(),
         ])
@@ -78,7 +69,37 @@ pub async fn solve_problem_with_tools(
     prompt: &str,
     toolbox: Arc<ToolBox>,
 ) -> anyhow::Result<GaiaOutput> {
-    let agent = Agent::new(model, Some(system), toolbox).with_max_steps(15);
-    let result = agent.run_structured::<GaiaOutput>(prompt).await?;
-    Ok(result.output)
+    // 用普通 run 而非 run_structured：DeepSeek 思考模式不支持 tool_choice=required
+    let agent = Agent::new(model, Some(system), toolbox).with_max_steps(30);
+    let result = agent.run(&json_prompt(prompt)).await?;
+    parse_gaia_output(&result.output)
+}
+
+/// 在 prompt 末尾追加 JSON 输出要求，引导模型返回结构化字段。
+/// 同时满足 DeepSeek json_object 模式要求 prompt 中出现 "json" 字样的约定。
+fn json_prompt(prompt: &str) -> String {
+    format!(
+        "{prompt}\n\n请以 JSON 对象格式输出最终结果，字段为：\
+is_solvable(布尔)、unsolvable_reason(字符串)、final_answer(字符串)。\
+不要输出任何 JSON 以外的内容。"
+    )
+}
+
+/// 把模型返回文本解析成 GaiaOutput，容忍被 markdown 代码块包裹的情况。
+fn parse_gaia_output(text: &str) -> anyhow::Result<GaiaOutput> {
+    let mut s = text.trim();
+    if let Ok(out) = serde_json::from_str::<GaiaOutput>(s) {
+        return Ok(out);
+    }
+    // 剥离 ```json / ``` 围栏后重试
+    if let Some(rest) = s.strip_prefix("```json") {
+        s = rest;
+    } else if let Some(rest) = s.strip_prefix("```") {
+        s = rest;
+    }
+    if let Some(rest) = s.strip_suffix("```") {
+        s = rest;
+    }
+    serde_json::from_str::<GaiaOutput>(s.trim())
+        .map_err(|e| anyhow::anyhow!("解析 GaiaOutput JSON 失败: {e}; 原文: {text}"))
 }
