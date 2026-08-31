@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::skill::Skill;
 use crate::tools::{
-    calculator::r#impl::CalculatorTool, file_delete::r#impl::DeleteFileTool, file_download::DownloadFileTool, file_list::r#impl::ListFileTool, file_read::r#impl::ReadFileTool, file_unzip::r#impl::UnzipFileTool, file_write::r#impl::WriteFileTool, mcp::{client::McpClient, tool::McpTool}, read_image::r#impl::ReadImageTool, run_script::RunScriptTool, tool::Tool, use_skill::UseSkillTool, web_search::r#impl::WebSearchTool,
+    calculator::r#impl::CalculatorTool, file_delete::r#impl::DeleteFileTool, file_download::r#impl::DownloadFileTool, file_list::r#impl::ListFileTool, file_read::r#impl::ReadFileTool, file_unzip::r#impl::UnzipFileTool, file_write::r#impl::WriteFileTool, mcp::{client::McpClient, tool::McpTool}, read_image::r#impl::ReadImageTool, run_script::r#impl::RunScriptTool, tool::Tool, use_skill::r#impl::UseSkillTool, web_search::r#impl::WebSearchTool,
 };
 
 pub mod calculator;
